@@ -39,14 +39,19 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.remote.ConnectionStatus
+import com.example.data.remote.OrderBookData
 import com.example.model.Candle
+import com.example.model.ChartDrawing
 import com.example.model.ChartStyle
+import com.example.model.DrawingToolType
 import com.example.model.IndicatorSettings
 import com.example.model.PriceAlert
 import com.example.model.SymbolInfo
 import com.example.model.Timeframe
 import com.example.ui.components.AlertCreateDialog
 import com.example.ui.components.ChartControlsBar
+import com.example.ui.components.OrderBookBottomSheet
 import com.example.ui.components.TimeframeSelector
 import com.example.ui.components.TradingChart
 import com.example.ui.theme.TvAlertAmber
@@ -68,25 +73,37 @@ fun ChartScreen(
     chartStyle: ChartStyle,
     indicatorSettings: IndicatorSettings,
     symbolAlerts: List<PriceAlert>,
+    activeDrawingTool: DrawingToolType,
+    drawings: List<ChartDrawing>,
+    connectionStatus: ConnectionStatus,
+    lastUpdateTimestamp: Long?,
+    isLoadingCandles: Boolean,
+    candleLoadError: String?,
+    orderBook: OrderBookData?,
     onSelectTimeframe: (Timeframe) -> Unit,
     onChartStyleChange: (ChartStyle) -> Unit,
     onIndicatorSettingsChange: (IndicatorSettings) -> Unit,
+    onSelectDrawingTool: (DrawingToolType) -> Unit,
+    onAddDrawing: (ChartDrawing) -> Unit,
+    onDeleteDrawing: (String) -> Unit,
+    onClearDrawings: () -> Unit,
     onToggleFavorite: (String) -> Unit,
     onOpenSymbolPicker: () -> Unit,
     onSaveAlert: (PriceAlert) -> Unit,
     onDeleteAlert: (Long) -> Unit,
-    onPriceShock: (percent: Double) -> Unit,
+    onRetryConnection: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showCreateAlertDialog by remember { mutableStateOf(false) }
     var alertInitialPrice by remember { mutableStateOf<Double?>(null) }
+    var showOrderBookSheet by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
             .fillMaxSize()
             .background(TvBackground)
     ) {
-        // Top Symbol Header Bar
+        // Top Symbol Header Bar with real 24h market stats
         TopSymbolHeader(
             symbolInfo = symbolInfo,
             onOpenSymbolPicker = onOpenSymbolPicker,
@@ -106,15 +123,18 @@ fun ChartScreen(
             onChartStyleChange = onChartStyleChange,
             indicatorSettings = indicatorSettings,
             onIndicatorSettingsChange = onIndicatorSettingsChange,
+            activeDrawingTool = activeDrawingTool,
+            onSelectDrawingTool = onSelectDrawingTool,
+            onClearDrawings = onClearDrawings,
+            onOpenOrderBook = { showOrderBookSheet = true },
             onOpenCreateAlert = {
                 alertInitialPrice = null
                 showCreateAlertDialog = true
             },
-            onPriceShock = onPriceShock,
             modifier = Modifier.fillMaxWidth()
         )
 
-        // Interactive TradingView Chart Canvas
+        // Interactive Financial Candlestick Chart
         TradingChart(
             symbolInfo = symbolInfo,
             candles = candles,
@@ -122,10 +142,19 @@ fun ChartScreen(
             chartStyle = chartStyle,
             indicatorSettings = indicatorSettings,
             activeAlerts = symbolAlerts,
+            activeDrawingTool = activeDrawingTool,
+            drawings = drawings,
+            connectionStatus = connectionStatus,
+            lastUpdateTimestamp = lastUpdateTimestamp,
+            isLoading = isLoadingCandles,
+            errorMessage = candleLoadError,
+            onAddDrawing = onAddDrawing,
+            onDeleteDrawing = onDeleteDrawing,
             onAddAlertAtPrice = { price ->
                 alertInitialPrice = price
                 showCreateAlertDialog = true
             },
+            onRetry = onRetryConnection,
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
@@ -137,7 +166,7 @@ fun ChartScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(TvSurface)
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                    .padding(horizontal = 12.dp, vertical = 5.dp)
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -207,6 +236,14 @@ fun ChartScreen(
             }
         )
     }
+
+    if (showOrderBookSheet) {
+        OrderBookBottomSheet(
+            symbolInfo = symbolInfo,
+            orderBook = orderBook,
+            onDismiss = { showOrderBookSheet = false }
+        )
+    }
 }
 
 @Composable
@@ -221,7 +258,7 @@ private fun TopSymbolHeader(
         modifier = Modifier
             .fillMaxWidth()
             .background(TvSurface)
-            .padding(horizontal = 14.dp, vertical = 8.dp),
+            .padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
@@ -250,7 +287,7 @@ private fun TopSymbolHeader(
                     )
                 }
                 Text(
-                    text = "${symbolInfo.name} • ${symbolInfo.category.label}",
+                    text = "${symbolInfo.name} • Binance Spot",
                     color = TvTextSecondary,
                     fontSize = 11.sp
                 )
@@ -261,7 +298,7 @@ private fun TopSymbolHeader(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(horizontalAlignment = Alignment.End) {
                 Text(
-                    text = symbolInfo.formatPrice(),
+                    text = if (symbolInfo.currentPrice > 0) symbolInfo.formatPrice() else "---.--",
                     color = TvTextWhite,
                     fontWeight = FontWeight.Black,
                     fontSize = 17.sp
@@ -282,7 +319,7 @@ private fun TopSymbolHeader(
                 }
             }
 
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.width(6.dp))
 
             IconButton(
                 onClick = onToggleFavorite,

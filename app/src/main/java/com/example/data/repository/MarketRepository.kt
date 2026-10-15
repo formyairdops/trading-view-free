@@ -1,11 +1,18 @@
 package com.example.data.repository
 
+import android.util.Log
+import com.example.data.remote.BinanceMarketDataProvider
+import com.example.data.remote.ConnectionStatus
+import com.example.data.remote.KlineStreamEvent
+import com.example.data.remote.MarketDataProvider
+import com.example.data.remote.OrderBookData
 import com.example.model.AssetCategory
 import com.example.model.Candle
 import com.example.model.SymbolInfo
 import com.example.model.Timeframe
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -13,9 +20,10 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import java.util.Random
-import kotlin.math.abs
+import kotlinx.coroutines.withContext
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.max
 import kotlin.math.min
 
@@ -27,20 +35,25 @@ data class PriceTick(
 )
 
 class MarketRepository(
-    private val scope: CoroutineScope = CoroutineScope(Dispatchers.Default)
+    private val scope: CoroutineScope = CoroutineScope(Dispatchers.Default),
+    private val dataProvider: MarketDataProvider = BinanceMarketDataProvider(scope)
 ) {
-    private val random = Random(42)
+    private val TAG = "MarketRepository"
 
-    private val initialSymbols = listOf(
+    val connectionStatus: StateFlow<ConnectionStatus> = dataProvider.connectionStatus
+    val lastUpdateTimestamp: StateFlow<Long?> = dataProvider.lastUpdateTimestamp
+
+    // Pre-configured cryptocurrency pairs supported on public exchange
+    private val defaultCryptoSymbols = listOf(
         SymbolInfo(
             symbol = "BTC/USDT",
             name = "Bitcoin",
             category = AssetCategory.CRYPTO,
-            currentPrice = 67450.00,
-            previousClose = 66120.00,
-            high24h = 68150.00,
-            low24h = 65890.00,
-            volume24h = 42890000000.0,
+            currentPrice = 0.0,
+            previousClose = 0.0,
+            high24h = 0.0,
+            low24h = 0.0,
+            volume24h = 0.0,
             priceDecimals = 2,
             isFavorite = true
         ),
@@ -48,11 +61,11 @@ class MarketRepository(
             symbol = "ETH/USDT",
             name = "Ethereum",
             category = AssetCategory.CRYPTO,
-            currentPrice = 3520.40,
-            previousClose = 3450.00,
-            high24h = 3585.00,
-            low24h = 3410.00,
-            volume24h = 18450000000.0,
+            currentPrice = 0.0,
+            previousClose = 0.0,
+            high24h = 0.0,
+            low24h = 0.0,
+            volume24h = 0.0,
             priceDecimals = 2,
             isFavorite = true
         ),
@@ -60,123 +73,136 @@ class MarketRepository(
             symbol = "SOL/USDT",
             name = "Solana",
             category = AssetCategory.CRYPTO,
-            currentPrice = 184.65,
-            previousClose = 179.20,
-            high24h = 189.50,
-            low24h = 176.80,
-            volume24h = 5890000000.0,
-            priceDecimals = 2,
-            isFavorite = false
-        ),
-        SymbolInfo(
-            symbol = "NVDA",
-            name = "NVIDIA Corp.",
-            category = AssetCategory.STOCKS,
-            currentPrice = 134.80,
-            previousClose = 131.50,
-            high24h = 136.20,
-            low24h = 130.40,
-            volume24h = 68900000000.0,
+            currentPrice = 0.0,
+            previousClose = 0.0,
+            high24h = 0.0,
+            low24h = 0.0,
+            volume24h = 0.0,
             priceDecimals = 2,
             isFavorite = true
         ),
         SymbolInfo(
-            symbol = "AAPL",
-            name = "Apple Inc.",
-            category = AssetCategory.STOCKS,
-            currentPrice = 228.75,
-            previousClose = 226.40,
-            high24h = 230.10,
-            low24h = 225.80,
-            volume24h = 41200000000.0,
+            symbol = "BNB/USDT",
+            name = "BNB",
+            category = AssetCategory.CRYPTO,
+            currentPrice = 0.0,
+            previousClose = 0.0,
+            high24h = 0.0,
+            low24h = 0.0,
+            volume24h = 0.0,
             priceDecimals = 2,
             isFavorite = false
         ),
         SymbolInfo(
-            symbol = "TSLA",
-            name = "Tesla Inc.",
-            category = AssetCategory.STOCKS,
-            currentPrice = 248.90,
-            previousClose = 254.10,
-            high24h = 256.40,
-            low24h = 246.20,
-            volume24h = 35800000000.0,
-            priceDecimals = 2,
-            isFavorite = false
-        ),
-        SymbolInfo(
-            symbol = "SPY",
-            name = "SPDR S&P 500 ETF",
-            category = AssetCategory.STOCKS,
-            currentPrice = 582.40,
-            previousClose = 580.10,
-            high24h = 584.20,
-            low24h = 579.50,
-            volume24h = 75000000000.0,
-            priceDecimals = 2,
-            isFavorite = false
-        ),
-        SymbolInfo(
-            symbol = "EUR/USD",
-            name = "Euro / US Dollar",
-            category = AssetCategory.FOREX,
-            currentPrice = 1.0845,
-            previousClose = 1.0820,
-            high24h = 1.0872,
-            low24h = 1.0815,
-            volume24h = 120000000000.0,
+            symbol = "XRP/USDT",
+            name = "Ripple",
+            category = AssetCategory.CRYPTO,
+            currentPrice = 0.0,
+            previousClose = 0.0,
+            high24h = 0.0,
+            low24h = 0.0,
+            volume24h = 0.0,
             priceDecimals = 4,
             isFavorite = false
         ),
         SymbolInfo(
-            symbol = "XAU/USD",
-            name = "Gold Spot / US Dollar",
-            category = AssetCategory.COMMODITIES,
-            currentPrice = 2685.50,
-            previousClose = 2668.00,
-            high24h = 2692.00,
-            low24h = 2664.00,
-            volume24h = 28000000000.0,
+            symbol = "DOGE/USDT",
+            name = "Dogecoin",
+            category = AssetCategory.CRYPTO,
+            currentPrice = 0.0,
+            previousClose = 0.0,
+            high24h = 0.0,
+            low24h = 0.0,
+            volume24h = 0.0,
+            priceDecimals = 4,
+            isFavorite = false
+        ),
+        SymbolInfo(
+            symbol = "ADA/USDT",
+            name = "Cardano",
+            category = AssetCategory.CRYPTO,
+            currentPrice = 0.0,
+            previousClose = 0.0,
+            high24h = 0.0,
+            low24h = 0.0,
+            volume24h = 0.0,
+            priceDecimals = 4,
+            isFavorite = false
+        ),
+        SymbolInfo(
+            symbol = "AVAX/USDT",
+            name = "Avalanche",
+            category = AssetCategory.CRYPTO,
+            currentPrice = 0.0,
+            previousClose = 0.0,
+            high24h = 0.0,
+            low24h = 0.0,
+            volume24h = 0.0,
             priceDecimals = 2,
-            isFavorite = true
+            isFavorite = false
         )
     )
 
-    private val _symbols = MutableStateFlow<List<SymbolInfo>>(emptyList())
+    private val _symbols = MutableStateFlow<List<SymbolInfo>>(defaultCryptoSymbols)
     val symbols: StateFlow<List<SymbolInfo>> = _symbols.asStateFlow()
 
     private val _priceTicks = MutableSharedFlow<PriceTick>(extraBufferCapacity = 64)
     val priceTicks: SharedFlow<PriceTick> = _priceTicks.asSharedFlow()
 
-    // Cache of candle history per symbol + timeframe
-    private val candleCache = mutableMapOf<String, MutableList<Candle>>()
+    // Real candle cache per symbol_timeframe
+    private val candleCache = ConcurrentHashMap<String, MutableList<Candle>>()
 
-    private var isSimulating = true
+    // Real-time kline stream subscription job
+    private var activeStreamJob: Job? = null
+    private var currentStreamSymbol: String? = null
+    private var currentStreamTimeframe: Timeframe? = null
+
+    // Real Order Book state
+    private val _orderBook = MutableStateFlow<OrderBookData?>(null)
+    val orderBook: StateFlow<OrderBookData?> = _orderBook.asStateFlow()
+
+    private val _isLoadingCandles = MutableStateFlow(false)
+    val isLoadingCandles: StateFlow<Boolean> = _isLoadingCandles.asStateFlow()
+
+    private val _candleLoadError = MutableStateFlow<String?>(null)
+    val candleLoadError: StateFlow<String?> = _candleLoadError.asStateFlow()
 
     init {
-        // Pre-generate sparklines for symbols
-        val initializedSymbols = initialSymbols.map { sym ->
-            val spark = generateSparkline(sym.currentPrice, sym.priceDecimals)
-            sym.copy(sparkline = spark)
-        }
-        _symbols.value = initializedSymbols
-
-        // Start live ticker loop
-        startLiveSimulation()
+        // Start background polling for 24h ticker updates for all watchlist symbols
+        start24hTickerPoll()
     }
 
-    private fun generateSparkline(basePrice: Double, decimals: Int): List<Double> {
-        val points = mutableListOf<Double>()
-        var price = basePrice * 0.98
-        points.add(price)
-        val rnd = Random()
-        repeat(15) {
-            val delta = price * ((rnd.nextDouble() - 0.48) * 0.008)
-            price += delta
-            points.add(price)
+    private fun start24hTickerPoll() {
+        scope.launch {
+            while (isActive) {
+                refresh24hTickers()
+                delay(8000) // update 24h statistics every 8 seconds
+            }
         }
-        points[points.lastIndex] = basePrice
-        return points
+    }
+
+    suspend fun refresh24hTickers() = withContext(Dispatchers.IO) {
+        val result = dataProvider.fetchAll24hTickers()
+        if (result.isSuccess) {
+            val tickerMap = result.getOrNull()?.associateBy { it.symbol } ?: emptyMap()
+            _symbols.value = _symbols.value.map { sym ->
+                val clean = sym.symbol.replace("/", "")
+                val tick = tickerMap[clean]
+                if (tick != null && tick.lastPrice > 0) {
+                    val prevPrice = if (sym.currentPrice > 0) sym.currentPrice else tick.lastPrice - tick.priceChange
+                    sym.copy(
+                        currentPrice = tick.lastPrice,
+                        previousClose = tick.lastPrice - tick.priceChange,
+                        high24h = tick.highPrice,
+                        low24h = tick.lowPrice,
+                        volume24h = tick.quoteVolume, // USDT volume
+                        sparkline = if (sym.sparkline.isEmpty()) listOf(tick.lowPrice, tick.lastPrice, tick.highPrice) else (sym.sparkline.takeLast(15) + tick.lastPrice)
+                    )
+                } else {
+                    sym
+                }
+            }
+        }
     }
 
     fun getSymbol(symbol: String): SymbolInfo? {
@@ -190,167 +216,161 @@ class MarketRepository(
     }
 
     /**
-     * Gets or generates historical candles for the given symbol and timeframe.
+     * Loads historical candles from real public market data API.
      */
-    fun getCandles(symbol: String, timeframe: Timeframe): List<Candle> {
-        val key = "${symbol}_${timeframe.name}"
-        return synchronized(candleCache) {
-            candleCache.getOrPut(key) {
-                generateHistoricalCandles(symbol, timeframe).toMutableList()
-            }.toList()
-        }
-    }
-
-    private fun generateHistoricalCandles(symbol: String, timeframe: Timeframe): List<Candle> {
-        val symInfo = getSymbol(symbol) ?: initialSymbols.first()
-        val count = timeframe.defaultCandleCount
-        val intervalMs = timeframe.intervalSeconds * 1000L
-        val now = System.currentTimeMillis()
-        val currentPrice = symInfo.currentPrice
-
-        val candles = mutableListOf<Candle>()
-        val rnd = Random(symbol.hashCode().toLong() + timeframe.ordinal * 1000L)
-
-        // Volatility depends on asset
-        val volatility = when (symInfo.category) {
-            AssetCategory.CRYPTO -> 0.012
-            AssetCategory.STOCKS -> 0.008
-            AssetCategory.FOREX -> 0.002
-            AssetCategory.COMMODITIES -> 0.005
-            else -> 0.008
+    suspend fun loadHistoricalCandles(
+        symbol: String,
+        timeframe: Timeframe,
+        forceRefresh: Boolean = false
+    ): Result<List<Candle>> = withContext(Dispatchers.IO) {
+        val key = "${symbol}_${timeframe.binanceInterval}"
+        if (!forceRefresh) {
+            val cached = candleCache[key]
+            if (cached != null && cached.isNotEmpty()) {
+                return@withContext Result.success(cached.toList())
+            }
         }
 
-        // Walk backwards from current price
-        var closePrice = currentPrice
-        val tempCandles = mutableListOf<Candle>()
+        _isLoadingCandles.value = true
+        _candleLoadError.value = null
 
-        for (i in 0 until count) {
-            val candleTime = now - ((count - 1 - i) * intervalMs)
+        val result = dataProvider.fetchHistoricalCandles(
+            symbol = symbol,
+            interval = timeframe.binanceInterval,
+            limit = timeframe.defaultCandleCount
+        )
 
-            // Random walk with slight mean reversion
-            val percentChange = (rnd.nextGaussian() * volatility) + 0.0005
-            val open = if (i == count - 1) {
-                closePrice * (1.0 - (rnd.nextDouble() - 0.5) * volatility * 0.5)
+        _isLoadingCandles.value = false
+
+        if (result.isSuccess) {
+            val fetchedCandles = result.getOrNull().orEmpty()
+            if (fetchedCandles.isNotEmpty()) {
+                candleCache[key] = fetchedCandles.toMutableList()
+
+                // Update current symbol price with latest closed candle if valid
+                val latest = fetchedCandles.last()
+                updateSymbolPrice(symbol, latest.close)
+
+                // Start or switch WebSocket streaming for live updates
+                subscribeToLiveUpdates(symbol, timeframe)
+
+                return@withContext Result.success(fetchedCandles)
             } else {
-                closePrice / (1.0 + percentChange)
+                _candleLoadError.value = "No candles returned from exchange for $symbol"
+                return@withContext Result.failure(Exception("Empty candles response"))
             }
-
-            val highLowSpread = abs(open * volatility * (0.8 + rnd.nextDouble()))
-            val high = max(open, closePrice) + (rnd.nextDouble() * highLowSpread)
-            val low = min(open, closePrice) - (rnd.nextDouble() * highLowSpread)
-            val volume = (symInfo.volume24h / (count * 2)) * (0.5 + rnd.nextDouble() * 1.2)
-
-            tempCandles.add(
-                Candle(
-                    timestamp = candleTime,
-                    open = roundToDecimals(open, symInfo.priceDecimals),
-                    high = roundToDecimals(high, symInfo.priceDecimals),
-                    low = roundToDecimals(low, symInfo.priceDecimals),
-                    close = roundToDecimals(closePrice, symInfo.priceDecimals),
-                    volume = volume
-                )
-            )
-
-            // Next step in backwards walk
-            closePrice = open
-        }
-
-        // Sort by timestamp ascending
-        return tempCandles
-    }
-
-    private fun startLiveSimulation() {
-        scope.launch {
-            while (true) {
-                delay(1200) // Live tick pulse every 1.2 seconds
-                if (!isSimulating) continue
-
-                // Pick a symbol to update or update all
-                _symbols.value = _symbols.value.map { sym ->
-                    val rnd = Random()
-                    val volatility = when (sym.category) {
-                        AssetCategory.CRYPTO -> 0.0018
-                        AssetCategory.STOCKS -> 0.0010
-                        AssetCategory.FOREX -> 0.0002
-                        AssetCategory.COMMODITIES -> 0.0008
-                        else -> 0.001
-                    }
-
-                    // Drift tick
-                    val drift = (rnd.nextDouble() - 0.495) * volatility
-                    val oldPrice = sym.currentPrice
-                    val newPrice = roundToDecimals(oldPrice * (1.0 + drift), sym.priceDecimals)
-
-                    // Emit tick event
-                    _priceTicks.tryEmit(PriceTick(sym.symbol, newPrice, oldPrice))
-
-                    // Update candle cache for active candles
-                    updateLatestCandle(sym.symbol, newPrice)
-
-                    val updatedHigh = max(sym.high24h, newPrice)
-                    val updatedLow = min(sym.low24h, newPrice)
-                    val newSparkline = sym.sparkline.drop(1) + newPrice
-
-                    sym.copy(
-                        currentPrice = newPrice,
-                        high24h = updatedHigh,
-                        low24h = updatedLow,
-                        sparkline = newSparkline
-                    )
-                }
-            }
-        }
-    }
-
-    private fun updateLatestCandle(symbol: String, newPrice: Double) {
-        synchronized(candleCache) {
-            Timeframe.entries.forEach { tf ->
-                val key = "${symbol}_${tf.name}"
-                val list = candleCache[key]
-                if (list != null && list.isNotEmpty()) {
-                    val lastIdx = list.lastIndex
-                    val lastCandle = list[lastIdx]
-                    val updated = lastCandle.copy(
-                        high = max(lastCandle.high, newPrice),
-                        low = min(lastCandle.low, newPrice),
-                        close = newPrice,
-                        volume = lastCandle.volume + (lastCandle.volume * 0.002)
-                    )
-                    list[lastIdx] = updated
-                }
-            }
+        } else {
+            val errorMsg = result.exceptionOrNull()?.message ?: "Failed to connect to market data feed"
+            _candleLoadError.value = errorMsg
+            Log.e(TAG, "Candle fetch failed: $errorMsg")
+            return@withContext Result.failure(result.exceptionOrNull() ?: Exception(errorMsg))
         }
     }
 
     /**
-     * Instantly stimulates a price move (e.g. +2% or -2%) to test price alerts immediately!
+     * Synchronously returns cached candles, or empty list if not yet loaded.
      */
-    fun triggerPriceShock(symbol: String, percentDelta: Double) {
-        val sym = getSymbol(symbol) ?: return
-        val oldPrice = sym.currentPrice
-        val newPrice = roundToDecimals(oldPrice * (1.0 + percentDelta / 100.0), sym.priceDecimals)
+    fun getCandles(symbol: String, timeframe: Timeframe): List<Candle> {
+        val key = "${symbol}_${timeframe.binanceInterval}"
+        return candleCache[key]?.toList() ?: emptyList()
+    }
 
-        _priceTicks.tryEmit(PriceTick(symbol, newPrice, oldPrice))
-        updateLatestCandle(symbol, newPrice)
+    /**
+     * Subscribes to live WebSocket stream for current symbol and timeframe.
+     */
+    fun subscribeToLiveUpdates(symbol: String, timeframe: Timeframe) {
+        if (currentStreamSymbol == symbol && currentStreamTimeframe == timeframe && activeStreamJob?.isActive == true) {
+            return
+        }
 
+        activeStreamJob?.cancel()
+        currentStreamSymbol = symbol
+        currentStreamTimeframe = timeframe
+
+        activeStreamJob = scope.launch {
+            dataProvider.startKlineStream(symbol, timeframe.binanceInterval)
+                .collect { event ->
+                    handleLiveKline(event)
+                }
+        }
+    }
+
+    /**
+     * Processes live incoming kline from WebSocket.
+     */
+    private fun handleLiveKline(event: KlineStreamEvent) {
+        val incoming = event.candle
+        val key = "${event.symbol}_${event.interval}"
+        val list = candleCache.getOrPut(key) { mutableListOf() }
+
+        synchronized(list) {
+            val lastIdx = list.lastIndex
+
+            if (lastIdx >= 0) {
+                val lastCandle = list[lastIdx]
+                if (lastCandle.timestamp == incoming.timestamp) {
+                    // Update the currently forming candle
+                    list[lastIdx] = incoming
+                } else if (incoming.timestamp > lastCandle.timestamp) {
+                    // Previous candle has closed; append new forming candle
+                    list.add(incoming)
+                    // Keep memory buffer reasonable
+                    if (list.size > 500) {
+                        list.removeAt(0)
+                    }
+                }
+            } else {
+                list.add(incoming)
+            }
+        }
+
+        // Emit price tick for live price badge and price alerts
+        val sym = getSymbol(event.symbol)
+        val oldPrice = sym?.currentPrice ?: incoming.open
+        _priceTicks.tryEmit(
+            PriceTick(
+                symbol = event.symbol,
+                price = incoming.close,
+                previousPrice = oldPrice,
+                timestamp = event.eventTime
+            )
+        )
+
+        updateSymbolPrice(event.symbol, incoming.close)
+    }
+
+    private fun updateSymbolPrice(symbol: String, price: Double) {
         _symbols.value = _symbols.value.map {
             if (it.symbol == symbol) {
+                val high = if (it.high24h > 0) max(it.high24h, price) else price
+                val low = if (it.low24h > 0) min(it.low24h, price) else price
                 it.copy(
-                    currentPrice = newPrice,
-                    high24h = max(it.high24h, newPrice),
-                    low24h = min(it.low24h, newPrice),
-                    sparkline = it.sparkline.drop(1) + newPrice
+                    currentPrice = price,
+                    high24h = high,
+                    low24h = low
                 )
             } else it
         }
     }
 
-    fun setSimulationActive(active: Boolean) {
-        isSimulating = active
+    /**
+     * Refreshes depth / order book for active symbol
+     */
+    suspend fun refreshOrderBook(symbol: String) = withContext(Dispatchers.IO) {
+        val result = dataProvider.fetchOrderBook(symbol, limit = 20)
+        if (result.isSuccess) {
+            _orderBook.value = result.getOrNull()
+        }
     }
 
-    private fun roundToDecimals(value: Double, decimals: Int): Double {
-        val factor = Math.pow(10.0, decimals.toDouble())
-        return Math.round(value * factor) / factor
+    /**
+     * Reconnects live feeds manually
+     */
+    fun retryConnection() {
+        val sym = currentStreamSymbol ?: "BTC/USDT"
+        val tf = currentStreamTimeframe ?: Timeframe.M15
+        scope.launch {
+            loadHistoricalCandles(sym, tf, forceRefresh = true)
+        }
     }
 }

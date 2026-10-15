@@ -33,7 +33,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -78,8 +77,15 @@ fun MainScreen(viewModel: MainViewModel) {
     val chartStyle by viewModel.chartStyle.collectAsStateWithLifecycle()
     val indicatorSettings by viewModel.indicatorSettings.collectAsStateWithLifecycle()
     val latestTriggerEvent by viewModel.latestTriggerEvent.collectAsStateWithLifecycle()
+    val currentCandles by viewModel.currentCandles.collectAsStateWithLifecycle()
+    val connectionStatus by viewModel.connectionStatus.collectAsStateWithLifecycle()
+    val lastUpdateTimestamp by viewModel.lastUpdateTimestamp.collectAsStateWithLifecycle()
+    val isLoadingCandles by viewModel.isLoadingCandles.collectAsStateWithLifecycle()
+    val candleLoadError by viewModel.candleLoadError.collectAsStateWithLifecycle()
+    val activeDrawingTool by viewModel.activeDrawingTool.collectAsStateWithLifecycle()
+    val currentDrawings by viewModel.currentSymbolDrawings.collectAsStateWithLifecycle()
+    val orderBook by viewModel.orderBook.collectAsStateWithLifecycle()
 
-    val candles = viewModel.getCandlesForCurrentSymbol()
     val activeAlertsCount = allAlerts.count { it.isActive && !it.isTriggered }
     val currentSymbolAlerts = allAlerts.filter { it.symbol == currentSymbol.symbol && it.isActive && !it.isTriggered }
 
@@ -232,19 +238,30 @@ fun MainScreen(viewModel: MainViewModel) {
                 MainTab.CHART -> {
                     ChartScreen(
                         symbolInfo = currentSymbol,
-                        candles = candles,
+                        candles = currentCandles,
                         timeframe = timeframe,
                         chartStyle = chartStyle,
                         indicatorSettings = indicatorSettings,
                         symbolAlerts = currentSymbolAlerts,
+                        activeDrawingTool = activeDrawingTool,
+                        drawings = currentDrawings,
+                        connectionStatus = connectionStatus,
+                        lastUpdateTimestamp = lastUpdateTimestamp,
+                        isLoadingCandles = isLoadingCandles,
+                        candleLoadError = candleLoadError,
+                        orderBook = orderBook,
                         onSelectTimeframe = viewModel::selectTimeframe,
                         onChartStyleChange = viewModel::setChartStyle,
                         onIndicatorSettingsChange = viewModel::updateIndicatorSettings,
+                        onSelectDrawingTool = viewModel::setActiveDrawingTool,
+                        onAddDrawing = viewModel::addDrawing,
+                        onDeleteDrawing = viewModel::deleteDrawing,
+                        onClearDrawings = viewModel::clearCurrentDrawings,
                         onToggleFavorite = viewModel::toggleFavorite,
                         onOpenSymbolPicker = { showSymbolPicker = true },
                         onSaveAlert = viewModel::createAlert,
                         onDeleteAlert = viewModel::deleteAlert,
-                        onPriceShock = viewModel::triggerPriceShock,
+                        onRetryConnection = viewModel::refreshChartData,
                         modifier = Modifier.fillMaxSize()
                     )
                 }
