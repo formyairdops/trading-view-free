@@ -1,0 +1,6 @@
+{
+  "name": "TradeAlert",
+  "description": "TradingView-style interactive candlestick and line price charts with technical indicators, multi-timeframe analysis, and real-time price alerts.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
